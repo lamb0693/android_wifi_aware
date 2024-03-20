@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">wifi_aware</string>
+    <string name="client">Client</string>
+    <string name="server">Server</string>
+    <string name="message">message</string>
+    <string name="send">send</string>
+    <string name="peerhandle">peerHandle</string>
+    <string name="not_defined">not defined</string>
+    <string name="asserver">AsServer</string>
+    <string name="asclient">AsClient</string>
+    <string name="servicename">serviceName</string>
+    <string name="service_name">service name</string>
+    <string name="as_server">as server</string>
+    <string name="disconnect">Disconnect</string>
+</resources>
