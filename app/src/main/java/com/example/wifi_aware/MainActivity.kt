@@ -1,10 +1,13 @@
 package com.example.wifi_aware
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.aware.DiscoverySessionCallback
 import android.net.wifi.aware.PeerHandle
 import android.net.wifi.aware.PublishConfig
@@ -12,6 +15,8 @@ import android.net.wifi.aware.PublishDiscoverySession
 import android.net.wifi.aware.SubscribeConfig
 import android.net.wifi.aware.SubscribeDiscoverySession
 import android.net.wifi.aware.WifiAwareManager
+import android.net.wifi.aware.WifiAwareNetworkInfo
+import android.net.wifi.aware.WifiAwareNetworkSpecifier
 import android.net.wifi.aware.WifiAwareSession
 import android.os.Build
 import android.os.Bundle
@@ -28,7 +33,14 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelProvider
 import com.example.wifi_aware.databinding.ActivityMainBinding
-import java.lang.Exception
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
+import kotlin.Exception
 
 
 class MainActivity : AppCompatActivity() {
@@ -40,6 +52,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var customAttachCallback: CustomAttachCallback
 
     lateinit var viewModel : MainViewModel
+
+    lateinit var connectivityManager : ConnectivityManager
+
+    var networkCallback : ConnectivityManager.NetworkCallback? = null
+
+    //private lateinit var socketThread : SocketThread
+    //private var socket : Socket? = null
+
+    private var serverSocketThread: ServerSocketThread? = null
+    private var clientSocketThread: ClientSocketThread? = null
 
     private fun initViewModel(){
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
@@ -126,6 +148,20 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        bindMain.btnSendUsingSocket.setOnClickListener{
+            sendMessage(bindMain.etMessage.text.toString())
+        }
+    }
+
+    private fun sendMessage(message : String){
+        val coroutineScope = CoroutineScope(Dispatchers.IO)
+        coroutineScope.launch {
+            viewModel.roleAsServer.value?.let{
+                if(it) serverSocketThread?.sendMessage(message)
+                else clientSocketThread?.sendMessage(message)
+            }
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.S)
@@ -150,9 +186,163 @@ class MainActivity : AppCompatActivity() {
 
         customAttachCallback = CustomAttachCallback(this)
 
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
         checkPermission()
         initListener()
 
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun initServerSocket(){
+        if(viewModel.roleAsServer.value != null
+            && !viewModel.roleAsServer.value!!) return
+
+        Log.i(">>>>", "init serversocket")
+        val ss = ServerSocket(0)
+        val port = ss.localPort
+
+        if(viewModel.publishDiscoverySession.value == null
+            || viewModel.peerHandle.value == null) return
+
+        val networkSpecifier = WifiAwareNetworkSpecifier.Builder(
+            viewModel.publishDiscoverySession.value!!,
+            viewModel.peerHandle.value!!)
+            .setPskPassphrase("12340987")
+            .setPort(port)
+            .build()
+        Log.i(">>>>", "init serversocket $networkSpecifier")
+
+        val myNetworkRequest = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI_AWARE)
+            .setNetworkSpecifier(networkSpecifier)
+            .build()
+        Log.i(">>>>", "init serversocket $myNetworkRequest")
+
+        val networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                Log.i(">>>>", "NetworkCallback onAvailable")
+                Toast.makeText(this@MainActivity, "Socket network availabe", Toast.LENGTH_LONG).show()
+
+                try{
+                    if(serverSocketThread == null) {
+                        serverSocketThread = ServerSocketThread(this@MainActivity)
+                        serverSocketThread?.start()
+                    }
+//                    if(socket == null) {
+//                        socket = ss.accept()
+//                        Log.i(">>>>", "server socket Accepted  created Socket = $socket")
+//
+//                        socket?.also{
+//                            socketThread = SocketThread(this@MainActivity)
+//                            socketThread.setSocket(it)
+//                            socketThread.start()
+//                            socketThread.sendMessage("it's from server")
+//                        }
+//                    }
+                } catch ( e : Exception){
+                    Log.e(">>>>", "starting socket thred except : ${e.message}")
+                }
+            }
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                super.onCapabilitiesChanged(network, networkCapabilities)
+                Log.i(">>>>", "NetworkCallback onCapabilitiesChanged network : $network")
+                Log.i(">>>>", "NetworkCapabilities : $networkCapabilities")
+
+//                val peerAwareInfo = networkCapabilities.transportInfo as WifiAwareNetworkInfo
+//                val peerIpv6 = peerAwareInfo.peerIpv6Addr
+//                val peerPort = peerAwareInfo.port
+//                //...
+//                try{
+//                    if(socket == null) {
+//                        socket = network.getSocketFactory().createSocket("localhost", ss.localPort)
+//                        Log.i(">>>>", "socket connected to Server, $socket")
+//                        socket?.also{
+//                            socketThread = SocketThread(this@MainActivity)
+//                            socketThread.setSocket(it)
+//                            socketThread.start()
+//                            //socketThread.sendMessage("it's from client")
+//                        }
+//                    }
+//                } catch ( e : Exception){
+//                    Log.e(">>>>", "connection To serversocket : ${e.message}")
+//                }
+            }
+            override fun onLost(network: Network) {
+                super.onLost(network)
+                Log.i(">>>>", "NetworkCallback onLost")
+            }
+        }
+        connectivityManager.requestNetwork(myNetworkRequest, networkCallback)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun connectToServerSocket(){
+        if(viewModel.roleAsServer.value != null
+            && viewModel.roleAsServer.value!!) return
+        Log.i(">>>>", "starting connecting to server socket")
+
+        if(viewModel.subscribeDiscoverySession.value == null
+            || viewModel.peerHandle.value == null) return
+
+
+        val networkSpecifier = WifiAwareNetworkSpecifier.Builder(
+            viewModel.subscribeDiscoverySession.value!!,
+            viewModel.peerHandle.value!!
+        )
+        .setPskPassphrase("12340987")
+        .build()
+
+        Log.i(">>>>", "connecting to server socket $networkSpecifier")
+
+        val myNetworkRequest = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI_AWARE)
+            .setNetworkSpecifier(networkSpecifier)
+            .build()
+        Log.i(">>>>", "connecting to server socket $myNetworkRequest")
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                Log.i(">>>>", "NetworkCallback onAvailable")
+                Toast.makeText(this@MainActivity, "Socket network availabe", Toast.LENGTH_LONG)
+                    .show()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                super.onCapabilitiesChanged(network, networkCapabilities)
+                Log.i(">>>>", "NetworkCallback onCapabilitiesChanged network : $network")
+                Log.i(">>>>", "NetworkCapabilities : $networkCapabilities")
+
+                val peerAwareInfo = networkCapabilities.transportInfo as WifiAwareNetworkInfo
+                val peerIpv6 = peerAwareInfo.peerIpv6Addr
+                //val peerPort = peerAwareInfo.port
+
+                if(clientSocketThread == null){
+                    clientSocketThread = ClientSocketThread(this@MainActivity, InetSocketAddress(peerIpv6, 8888))
+                    clientSocketThread?.start()
+                }
+
+
+//                networkCallback?.let{
+//                    connectivityManager.unregisterNetworkCallback(it)
+//                }
+            }
+
+            override fun onLost(network: Network) {
+                super.onLost(network)
+                Log.i(">>>>", "NetworkCallback onLost")
+            }
+        }
+        connectivityManager.requestNetwork(myNetworkRequest,
+            networkCallback as ConnectivityManager.NetworkCallback
+        )
     }
 
     fun removeCurrentWifiAwareSession(){
@@ -184,17 +374,21 @@ class MainActivity : AppCompatActivity() {
         if(viewModel.roleAsServer.value!!) {
             val config: PublishConfig = PublishConfig.Builder()
                 .setServiceName(viewModel.serviceName.value!!)
+                .setTtlSec(0)
                 .build()
             viewModel.wifiAwareSession.value?.publish(config, object : DiscoverySessionCallback() {
                 override fun onPublishStarted(session: PublishDiscoverySession) {
                     Log.i(">>>>", "onPublishStarted... $session")
                     viewModel.setPublishDiscoverySession(session)
                 }
+                @RequiresApi(Build.VERSION_CODES.Q)
                 override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
                     val receivedMessage = String(message, Charsets.UTF_8)
                     Log.i(">>>>", "onMessageReceived...$peerHandle, $receivedMessage")
                     viewModel.setPeerHandle(peerHandle)
                     Toast.makeText(this@MainActivity, receivedMessage, Toast.LENGTH_SHORT).show()
+                    initServerSocket()
+                    viewModel.publishDiscoverySession.value?.sendMessage(peerHandle, 101, "from server".toByteArray())
                 }
                 override fun onSessionTerminated() {
                     Log.i(">>>>", "onSessionTerminated")
@@ -210,7 +404,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             val config: SubscribeConfig = SubscribeConfig.Builder()
                 .setServiceName(viewModel.serviceName.value!!)
-                .setTtlSec(20)
+                .setTtlSec(0)
                 .build()
             viewModel.wifiAwareSession.value?.subscribe(config, object : DiscoverySessionCallback() {
                 override fun onSubscribeStarted(session: SubscribeDiscoverySession) {
@@ -228,10 +422,12 @@ class MainActivity : AppCompatActivity() {
                     viewModel.subscribeDiscoverySession.value?.sendMessage(peerHandle,101, messageToSend.toByteArray(Charsets.UTF_8))
                     Toast.makeText(this@MainActivity, "Connected to server", Toast.LENGTH_SHORT).show()
                 }
+                @RequiresApi(Build.VERSION_CODES.Q)
                 override fun onMessageReceived(peerHandle: PeerHandle, message: ByteArray) {
                     val receivedMessage = String(message, Charsets.UTF_8)
                     Log.i(">>>>", "onMessageReceived...$peerHandle, $receivedMessage")
                     Toast.makeText(this@MainActivity, receivedMessage, Toast.LENGTH_SHORT).show()
+                    connectToServerSocket()
                 }
                 override fun onSessionTerminated() {
                     removeCurrentWifiAwareSession()

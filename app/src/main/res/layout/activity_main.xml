@@ -22,7 +22,7 @@
         android:id="@+id/btnAttach"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="124dp"
+        android:layout_marginStart="32dp"
         android:layout_marginTop="8dp"
         android:text="Attach"
         app:layout_constraintStart_toStartOf="parent"
@@ -180,11 +180,21 @@
         android:id="@+id/btnDisconnect"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="53dp"
+        android:layout_marginStart="20dp"
         android:layout_marginTop="8dp"
         android:text="@string/disconnect"
         app:layout_constraintStart_toEndOf="@+id/btnAttach"
         app:layout_constraintTop_toBottomOf="@+id/tvDiscoverySession" />
+
+    <Button
+        android:id="@+id/btnSendUsingSocket"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="42dp"
+        android:layout_marginTop="12dp"
+        android:text="@string/send_using_socket"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/etMessage" />
 
 
 </androidx.constraintlayout.widget.ConstraintLayout>

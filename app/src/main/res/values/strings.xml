@@ -12,4 +12,6 @@
     <string name="service_name">service name</string>
     <string name="as_server">as server</string>
     <string name="disconnect">Disconnect</string>
+    <string name="open_socket">Open Socket</string>
+    <string name="send_using_socket">Send Using Socket</string>
 </resources>
